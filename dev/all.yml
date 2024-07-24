@@ -2,12 +2,12 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: monitoring
+  name: adi
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: argotest
+  name: adi
 ---
 # ConfigMap for Prometheus Configuration
 apiVersion: v1
