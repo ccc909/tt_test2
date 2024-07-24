@@ -1,109 +1,47 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: prometheus-sa
-  namespace: monitoring
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: prometheus-cluster-role
-rules:
-- apiGroups: [""]
-  resources: ["pods", "nodes", "services", "endpoints"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get"]
-- apiGroups: ["extensions", "apps"]
-  resources: ["replicasets"]
-  verbs: ["get", "list", "watch"]
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: prometheus-cluster-role-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: prometheus-cluster-role
-subjects:
-- kind: ServiceAccount
-  name: prometheus-sa
-  namespace: monitoring
-
----
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
-  name: node-exporter
-  namespace: monitoring
-spec:
-  selector:
-    matchLabels:
-      app: node-exporter
-  template:
-    metadata:
-      labels:
-        app: node-exporter
-    spec:
-      containers:
-      - name: node-exporter
-        image: prom/node-exporter
-        ports:
-        - containerPort: 9100
-          hostPort: 9100
-        resources:
-          requests:
-            cpu: 50m
-            memory: 50Mi
-          limits:
-            cpu: 100m
-            memory: 100Mi
-        securityContext:
-          privileged: true
-      hostNetwork: true
-      hostPID: true
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
-      - key: node-role.kubernetes.io/control-plane
-        effect: NoSchedule
----
-apiVersion: apps/v1
-kind: ReplicaSet
-metadata:
-  name: example-replicaset
+  name: python-deployment
   namespace: monitoring
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: example
+      app: python-app
   template:
     metadata:
       labels:
-        app: example
+        app: python-app
     spec:
       containers:
-      - name: example-container
-        image: nginx
-        ports:
-        - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: example-service
-  namespace: monitoring
-spec:
-  selector:
-    app: example
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 80
+        - name: python-container
+          image: python:3.9-slim
+          command: ["python", "-m", "http.server", "8080"]
+          ports:
+            - containerPort: 8080
+        - name: node-exporter
+          image: prom/node-exporter:latest
+          args:
+            - "--path.procfs=/host/proc"
+            - "--path.sysfs=/host/sys"
+            - "--collector.filesystem.ignored-mount-points"
+            - "^/(sys|proc|dev|host|etc)($|/)"
+          ports:
+            - containerPort: 9100
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -115,19 +53,22 @@ data:
     global:
       scrape_interval: 15s
     scrape_configs:
-      - job_name: 'node-exporter'
-        kubernetes_sd_configs:
-          - role: node
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_node_name]
-            target_label: instance
-      - job_name: 'kubernetes-pods'
-        kubernetes_sd_configs:
-          - role: pod
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            action: keep
-            regex: example|prometheus|grafana
+      - job_name: 'python-app'
+        static_configs:
+          - targets: ['python-deployment:9100']
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9090
+      targetPort: 9090
+  selector:
+    app: prometheus
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -144,32 +85,34 @@ spec:
       labels:
         app: prometheus
     spec:
-      serviceAccountName: prometheus-sa
       containers:
-      - name: prometheus
-        image: prom/prometheus
-        args:
-        - --config.file=/etc/prometheus/prometheus.yml
-        volumeMounts:
-        - name: config-volume
-          mountPath: /etc/prometheus
+        - name: prometheus
+          image: prom/prometheus
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/prometheus/
       volumes:
-      - name: config-volume
-        configMap:
-          name: prometheus-config
+        - name: config-volume
+          configMap:
+            name: prometheus-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: prometheus-service
+  name: grafana
   namespace: monitoring
 spec:
-  selector:
-    app: prometheus
+  type: NodePort
   ports:
-  - protocol: TCP
-    port: 9090
-    targetPort: 9090
+    - port: 3000
+      targetPort: 3000
+      nodePort: 32000
+  selector:
+    app: grafana
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -187,61 +130,7 @@ spec:
         app: grafana
     spec:
       containers:
-      - name: grafana
-        image: grafana/grafana
-        ports:
-        - containerPort: 3000
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: grafana-service
-  namespace: monitoring
-spec:
-  selector:
-    app: grafana
-  ports:
-  - protocol: TCP
-    port: 3000
-    targetPort: 3000
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-datasources
-  namespace: monitoring
-  labels:
-    grafana_datasource: "1"
-data:
-  prometheus.yaml: |
-    apiVersion: 1
-    datasources:
-    - name: Prometheus
-      type: prometheus
-      access: proxy
-      url: http://prometheus-service.monitoring.svc.cluster.local:9090
-      isDefault: true
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: grafana-role
-  namespace: monitoring
-rules:
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: grafana-role-binding
-  namespace: monitoring
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: grafana-role
-subjects:
-- kind: ServiceAccount
-  name: default
-  namespace: monitoring
+        - name: grafana
+          image: grafana/grafana
+          ports:
+            - containerPort: 3000
