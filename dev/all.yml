@@ -12,7 +12,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: prometheus-config
-  namespace: monitoring
+  namespace: adi
 data:
   prometheus.yml: |
     global:
@@ -43,7 +43,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus-deployment
-  namespace: monitoring
+  namespace: adi
 spec:
   replicas: 1
   selector:
@@ -76,7 +76,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: prometheus-service
-  namespace: monitoring
+  namespace: adi
 spec:
   type: ClusterIP
   selector:
@@ -89,7 +89,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: node-exporter
-  namespace: monitoring
+  namespace: adi
   labels:
     app: node-exporter
 spec:
