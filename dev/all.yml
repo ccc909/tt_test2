@@ -1,122 +1,29 @@
-# ConfigMap for Prometheus Configuration
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-  namespace: adi
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-    scrape_configs:
-      - job_name: 'node-exporter'
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names:
-                - adi
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            action: keep
-            regex: node-exporter
-      - job_name: 'app'
-        kubernetes_sd_configs:
-          - role: pod
-            namespaces:
-              names:
-                - adi
-        relabel_configs:
-          - source_labels: [__meta_kubernetes_pod_label_app]
-            action: keep
-            regex: app
----
-# Prometheus ServiceAccount, Role, and RoleBinding in the monitoring namespace
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: prometheus-sa
-  namespace: adi
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: prometheus-role
-  namespace: adi
-rules:
-- apiGroups: [""]
-  resources: ["pods", "pods/metrics"]
-  verbs: ["list", "watch"]
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: prometheus-rolebinding
-  namespace: adi
-subjects:
-- kind: ServiceAccount
-  name: prometheus-sa
-  namespace: adi
-roleRef:
-  kind: Role
-  name: prometheus-role
-  apiGroup: rbac.authorization.k8s.io
----
-# Prometheus Deployment
 apiVersion: apps/v1
-kind: Deployment
+kind: ReplicaSet
 metadata:
-  name: prometheus-deployment
-  namespace: adi
+  name: my-replicaset
+  labels:
+    app: my-app
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
-      app: prometheus
+      app: my-app
   template:
     metadata:
       labels:
-        app: prometheus
+        app: my-app
     spec:
-      serviceAccountName: prometheus-sa
       containers:
-      - name: prometheus
-        image: prom/prometheus:v2.46.0
+      - name: my-container
+        image: my-docker-image:latest
         ports:
-        - containerPort: 9090
-        volumeMounts:
-        - name: prometheus-config-volume
-          mountPath: /etc/prometheus/prometheus.yml
-          subPath: prometheus.yml
-        args:
-        - "--config.file=/etc/prometheus/prometheus.yml"
-      volumes:
-      - name: prometheus-config-volume
-        configMap:
-          name: prometheus-config
+        - containerPort: 80
 ---
-# Prometheus Service
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus-service
-  namespace: adi
-spec:
-  type: ClusterIP
-  selector:
-    app: prometheus
-  ports:
-    - port: 9090
-      targetPort: 9090
----
-# Node Exporter DaemonSet
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: node-exporter
-  namespace: adi
   labels:
     app: node-exporter
 spec:
@@ -129,55 +36,49 @@ spec:
         app: node-exporter
     spec:
       containers:
-      - name: node-exporter
-        image: prom/node-exporter:v1.3.1
+      - name: prometheus-node-exporter
+        image: prom/node-exporter:latest
         ports:
         - containerPort: 9100
-          protocol: TCP
         resources:
-          requests:
-            memory: 30Mi
+          limits:
             cpu: 100m
-          limits:
-            memory: 50Mi
-            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+        args:
+        - "--path.procfs=/host/proc"
+        - "--path.sysfs=/host/sys"
+        - "--web.listen-address=0.0.0.0:9100"
+      hostNetwork: true
+      hostPID: true
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
 ---
-# App Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app-deployment
-  namespace: adi
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: app
-  template:
-    metadata:
-      labels:
-        app: app
-    spec:
-      containers:
-      - name: appcontainer
-        image: ghcr.io/ccc909/proiect_tt:latest
-        ports:
-          - containerPort: 9090
-        resources:
-          limits:
-            memory: "128Mi"
-            cpu: "500m"
----
-# App Service
 apiVersion: v1
 kind: Service
 metadata:
-  name: app-service
-  namespace: adi
+  name: node-exporter
+  labels:
+    app: node-exporter
 spec:
-  selector:
-    app: app
   ports:
-    - protocol: TCP
-      port: 9100
-      targetPort: 9100
+  - name: metrics
+    port: 9100
+    targetPort: 9100
+  selector:
+    app: node-exporter
+  type: NodePort
