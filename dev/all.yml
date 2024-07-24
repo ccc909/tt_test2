@@ -1,14 +1,3 @@
-# Namespace Definitions
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: adi
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: adi
----
 # ConfigMap for Prometheus Configuration
 apiVersion: v1
 kind: ConfigMap
