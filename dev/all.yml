@@ -5,9 +5,10 @@ metadata:
   namespace: monitoring
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: prometheus-cluster-role
+  name: prometheus-role
+  namespace: monitoring
 rules:
 - apiGroups: [""]
   resources: ["pods", "nodes", "services", "endpoints"]
@@ -20,52 +21,55 @@ rules:
   verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
-  name: prometheus-cluster-role-binding
+  name: prometheus-role-binding
+  namespace: monitoring
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: prometheus-cluster-role
+  kind: Role
+  name: prometheus-role
 subjects:
 - kind: ServiceAccount
   name: prometheus-sa
   namespace: monitoring
-
 ---
 apiVersion: apps/v1
-kind: ReplicaSet
+kind: DaemonSet
 metadata:
-  name: example-replicaset
+  name: node-exporter
   namespace: monitoring
 spec:
-  replicas: 3
   selector:
     matchLabels:
-      app: example
+      app: node-exporter
   template:
     metadata:
       labels:
-        app: example
+        app: node-exporter
     spec:
       containers:
-      - name: example-container
-        image: nginx
+      - name: node-exporter
+        image: prom/node-exporter
         ports:
-        - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: example-service
-  namespace: monitoring
-spec:
-  selector:
-    app: example
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 80
+        - containerPort: 9100
+          hostPort: 9100
+        resources:
+          requests:
+            cpu: 50m
+            memory: 50Mi
+          limits:
+            cpu: 100m
+            memory: 100Mi
+        securityContext:
+          privileged: true
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -77,13 +81,19 @@ data:
     global:
       scrape_interval: 15s
     scrape_configs:
-      - job_name: 'example'
+      - job_name: 'node-exporter'
+        kubernetes_sd_configs:
+        - role: node
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_node_name]
+          target_label: instance
+      - job_name: 'kubernetes-pods'
         kubernetes_sd_configs:
           - role: pod
         relabel_configs:
           - source_labels: [__meta_kubernetes_pod_label_app]
             action: keep
-            regex: example
+            regex: prometheus|grafana
 ---
 apiVersion: apps/v1
 kind: Deployment
