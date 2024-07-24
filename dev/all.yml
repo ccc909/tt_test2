@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: my-container
-        image: my-docker-image:latest
+        image: ghcr.io/ccc909/proiect_tt:latest
         ports:
         - containerPort: 80
 ---
