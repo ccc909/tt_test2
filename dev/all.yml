@@ -162,7 +162,7 @@ spec:
       - name: appcontainer
         image: ghcr.io/ccc909/proiect_tt:latest
         ports:
-          - containerPort: 8080
+          - containerPort: 9100
         resources:
           limits:
             memory: "128Mi"
