@@ -1,140 +1,152 @@
+---
 apiVersion: apps/v1
-kind: Deployment
+kind: ReplicaSet
 metadata:
-  name: python-deployment
-  namespace: monitoring
+  name: simple-python-rs
+  labels:
+    app: simple-python
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: python-app
+      app: simple-python
   template:
     metadata:
       labels:
-        app: python-app
+        app: simple-python
     spec:
       containers:
-        - name: python-container
-          image: python:3.9-slim
-          command: ["python", "-m", "http.server", "8080"]
-          ports:
-            - containerPort: 8080
-        - name: node-exporter
-          image: prom/node-exporter:latest
-          args:
-            - "--path.procfs=/host/proc"
-            - "--path.sysfs=/host/sys"
-            - "--collector.filesystem.ignored-mount-points"
-            - "^/(sys|proc|dev|host|etc)($|/)"
-          ports:
-            - containerPort: 9100
-          volumeMounts:
-            - name: proc
-              mountPath: /host/proc
-              readOnly: true
-            - name: sys
-              mountPath: /host/sys
-              readOnly: true
-      volumes:
-        - name: proc
-          hostPath:
-            path: /proc
-        - name: sys
-          hostPath:
-            path: /sys
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: python-service
-  namespace: monitoring
-spec:
-  selector:
-    app: python-app
-  ports:
-    - protocol: TCP
-      port: 8080
-      targetPort: 8080
-    - protocol: TCP
-      port: 9100
-      targetPort: 9100
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-  namespace: monitoring
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-    scrape_configs:
-      - job_name: 'python-app'
-        static_configs:
-          - targets: ['python-service.monitoring.svc.cluster.local:9100']
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus
-  namespace: monitoring
-spec:
-  type: ClusterIP
-  ports:
-    - port: 9090
-      targetPort: 9090
-  selector:
-    app: prometheus
+      - name: simple-python
+        image: <your-docker-registry>/simple-python:latest
+        ports:
+        - containerPort: 8000
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
-  name: prometheus-deployment
-  namespace: monitoring
+  name: node-exporter
+  labels:
+    app: node-exporter
 spec:
-  replicas: 1
   selector:
     matchLabels:
-      app: prometheus
+      app: node-exporter
   template:
     metadata:
       labels:
-        app: prometheus
+        app: node-exporter
     spec:
       containers:
-        - name: prometheus
-          image: prom/prometheus
-          args:
-            - "--config.file=/etc/prometheus/prometheus.yml"
-          ports:
-            - containerPort: 9090
-          volumeMounts:
-            - name: config-volume
-              mountPath: /etc/prometheus/
+      - name: node-exporter
+        image: quay.io/prometheus/node-exporter:latest
+        ports:
+        - containerPort: 9100
+          hostPort: 9100
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "250m"
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+        - name: root
+          mountPath: /rootfs
+          readOnly: true
+      hostNetwork: true
+      hostPID: true
       volumes:
-        - name: config-volume
-          configMap:
-            name: prometheus-config
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: root
+        hostPath:
+          path: /
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus
+  labels:
+    prometheus: k8s
+spec:
+  replicas: 1
+  serviceAccountName: prometheus
+  serviceMonitorSelector:
+    matchLabels:
+      team: frontend
+  resources:
+    requests:
+      memory: 400Mi
+  ruleSelector:
+    matchLabels:
+      role: alert-rules
+  storage:
+    volumeClaimTemplate:
+      spec:
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    prometheus: k8s
+  name: prometheus
+spec:
+  ports:
+  - name: web
+    nodePort: 30090
+    port: 9090
+    targetPort: 9090
+  selector:
+    prometheus: k8s
+  type: NodePort
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: node-exporter
+  labels:
+    team: frontend
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  endpoints:
+  - port: 9100
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: grafana
-  namespace: monitoring
+  labels:
+    app: grafana
 spec:
   type: NodePort
   ports:
     - port: 3000
       targetPort: 3000
-      nodePort: 32000
+      nodePort: 30030
   selector:
     app: grafana
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: grafana-deployment
-  namespace: monitoring
+  name: grafana
+  labels:
+    app: grafana
 spec:
   replicas: 1
   selector:
@@ -146,10 +158,15 @@ spec:
         app: grafana
     spec:
       containers:
-        - name: grafana
-          image: grafana/grafana
-          ports:
-            - containerPort: 3000
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: admin
+        - name: GF_SECURITY_ADMIN_USER
+          value: admin
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -164,7 +181,7 @@ spec:
     path: .
   destination:
     server: 'https://kubernetes.default.svc'
-    namespace: monitoring
+    namespace: default
   syncPolicy:
     automated:
       prune: true
