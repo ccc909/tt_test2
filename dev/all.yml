@@ -1,3 +1,4 @@
+# Namespace Definitions
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -6,13 +7,14 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: adi
+  name: argotest
 ---
+# ConfigMap for Prometheus Configuration
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: prometheus-config
-  namespace: adi
+  namespace: monitoring
 data:
   prometheus.yml: |
     global:
@@ -33,17 +35,52 @@ data:
           - role: pod
             namespaces:
               names:
-                - adi
+                - argotest
         relabel_configs:
           - source_labels: [__meta_kubernetes_pod_label_app]
             action: keep
             regex: app
 ---
+# Prometheus ServiceAccount, Role, and RoleBinding in the monitoring namespace
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-sa
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-role
+  namespace: monitoring
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/metrics"]
+  verbs: ["list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-rolebinding
+  namespace: monitoring
+subjects:
+- kind: ServiceAccount
+  name: prometheus-sa
+  namespace: monitoring
+roleRef:
+  kind: Role
+  name: prometheus-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Prometheus Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus-deployment
-  namespace: adi
+  namespace: monitoring
 spec:
   replicas: 1
   selector:
@@ -54,6 +91,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: prometheus-sa
       containers:
       - name: prometheus
         image: prom/prometheus:v2.46.0
@@ -69,14 +107,13 @@ spec:
       - name: prometheus-config-volume
         configMap:
           name: prometheus-config
-
-
 ---
+# Prometheus Service
 apiVersion: v1
 kind: Service
 metadata:
   name: prometheus-service
-  namespace: adi
+  namespace: monitoring
 spec:
   type: ClusterIP
   selector:
@@ -85,11 +122,12 @@ spec:
     - port: 9090
       targetPort: 9090
 ---
+# Node Exporter DaemonSet
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: node-exporter
-  namespace: adi
+  namespace: monitoring
   labels:
     app: node-exporter
 spec:
@@ -115,11 +153,12 @@ spec:
             memory: 50Mi
             cpu: 200m
 ---
+# App Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-deployment
-  namespace: adi
+  namespace: argotest
 spec:
   replicas: 3
   selector:
@@ -140,11 +179,12 @@ spec:
             memory: "128Mi"
             cpu: "500m"
 ---
+# App Service
 apiVersion: v1
 kind: Service
 metadata:
   name: app-service
-  namespace: adi
+  namespace: argotest
 spec:
   selector:
     app: app
