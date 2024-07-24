@@ -1,152 +1,90 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-app
 ---
 apiVersion: apps/v1
 kind: ReplicaSet
 metadata:
-  name: simple-python-rs
-  labels:
-    app: simple-python
+  name: python-app
+  namespace: my-app
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: simple-python
+      app: python-app
   template:
     metadata:
       labels:
-        app: simple-python
+        app: python-app
     spec:
       containers:
-      - name: simple-python
-        image: <your-docker-registry>/simple-python:latest
+      - name: python
+        image: python:3.9-slim
         ports:
-        - containerPort: 8000
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: node-exporter
-  labels:
-    app: node-exporter
-spec:
-  selector:
-    matchLabels:
-      app: node-exporter
-  template:
-    metadata:
-      labels:
-        app: node-exporter
-    spec:
-      containers:
+        - containerPort: 8080
       - name: node-exporter
-        image: quay.io/prometheus/node-exporter:latest
+        image: quay.io/prometheus/node-exporter:v1.2.2
         ports:
         - containerPort: 9100
-          hostPort: 9100
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "100m"
-          limits:
-            memory: "128Mi"
-            cpu: "250m"
-        volumeMounts:
-        - name: proc
-          mountPath: /host/proc
-          readOnly: true
-        - name: sys
-          mountPath: /host/sys
-          readOnly: true
-        - name: root
-          mountPath: /rootfs
-          readOnly: true
-      hostNetwork: true
-      hostPID: true
-      volumes:
-      - name: proc
-        hostPath:
-          path: /proc
-      - name: sys
-        hostPath:
-          path: /sys
-      - name: root
-        hostPath:
-          path: /
----
-apiVersion: monitoring.coreos.com/v1
-kind: Prometheus
-metadata:
-  name: prometheus
-  labels:
-    prometheus: k8s
-spec:
-  replicas: 1
-  serviceAccountName: prometheus
-  serviceMonitorSelector:
-    matchLabels:
-      team: frontend
-  resources:
-    requests:
-      memory: 400Mi
-  ruleSelector:
-    matchLabels:
-      role: alert-rules
-  storage:
-    volumeClaimTemplate:
-      spec:
-        resources:
-          requests:
-            storage: 1Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  labels:
-    prometheus: k8s
-  name: prometheus
+  name: python-app-service
+  namespace: my-app
 spec:
-  ports:
-  - name: web
-    nodePort: 30090
-    port: 9090
-    targetPort: 9090
   selector:
-    prometheus: k8s
-  type: NodePort
+    app: python-app
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter-service
+  namespace: my-app
+spec:
+  selector:
+    app: python-app
+  ports:
+    - protocol: TCP
+      port: 9100
+      targetPort: 9100
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: node-exporter
-  labels:
-    team: frontend
+  name: python-app-monitor
+  namespace: my-app
 spec:
   selector:
     matchLabels:
-      app: node-exporter
+      app: python-app
   endpoints:
-  - port: 9100
+  - port: "9100"
 ---
 apiVersion: v1
-kind: Service
+kind: ConfigMap
 metadata:
-  name: grafana
-  labels:
-    app: grafana
-spec:
-  type: NodePort
-  ports:
-    - port: 3000
-      targetPort: 3000
-      nodePort: 30030
-  selector:
-    app: grafana
+  name: grafana-datasources
+  namespace: my-app
+data:
+  prometheus.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
-  labels:
-    app: grafana
+  namespace: my-app
 spec:
   replicas: 1
   selector:
@@ -159,30 +97,91 @@ spec:
     spec:
       containers:
       - name: grafana
-        image: grafana/grafana:latest
+        image: grafana/grafana:8.3.0
         ports:
         - containerPort: 3000
-        env:
-        - name: GF_SECURITY_ADMIN_PASSWORD
-          value: admin
-        - name: GF_SECURITY_ADMIN_USER
-          value: admin
+        volumeMounts:
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        - name: grafana-config
+          mountPath: /etc/grafana/provisioning/datasources
+          subPath: prometheus.yml
+      volumes:
+      - name: grafana-storage
+        emptyDir: {}
+      - name: grafana-config
+        configMap:
+          name: grafana-datasources
 ---
-apiVersion: argoproj.io/v1alpha1
-kind: Application
+apiVersion: v1
+kind: Service
 metadata:
-  name: python-metrics-app
-  namespace: argocd
+  name: grafana-service
+  namespace: my-app
 spec:
-  project: default
-  source:
-    repoURL: 'https://github.com/your-repo/k8s-manifests'
-    targetRevision: HEAD
-    path: .
-  destination:
-    server: 'https://kubernetes.default.svc'
-    namespace: default
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+  selector:
+    app: grafana
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: my-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v2.29.1
+        ports:
+        - containerPort: 9090
+        volumeMounts:
+        - name: prometheus-config
+          mountPath: /etc/prometheus/prometheus.yml
+          subPath: prometheus.yml
+      volumes:
+      - name: prometheus-config
+        configMap:
+          name: prometheus-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: my-app
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: python-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-service
+  namespace: my-app
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 9090
