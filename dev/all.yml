@@ -14,7 +14,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: prometheus-config
-  namespace: monitoring
+  namespace: adi
 data:
   prometheus.yml: |
     global:
@@ -46,13 +46,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: prometheus-sa
-  namespace: monitoring
+  namespace: adi
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: prometheus-role
-  namespace: monitoring
+  namespace: adi
 rules:
 - apiGroups: [""]
   resources: ["pods", "pods/metrics"]
@@ -65,11 +65,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: prometheus-rolebinding
-  namespace: monitoring
+  namespace: adi
 subjects:
 - kind: ServiceAccount
   name: prometheus-sa
-  namespace: monitoring
+  namespace: adi
 roleRef:
   kind: Role
   name: prometheus-role
@@ -80,7 +80,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus-deployment
-  namespace: monitoring
+  namespace: adi
 spec:
   replicas: 1
   selector:
@@ -113,7 +113,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: prometheus-service
-  namespace: monitoring
+  namespace: adi
 spec:
   type: ClusterIP
   selector:
@@ -127,7 +127,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: node-exporter
-  namespace: monitoring
+  namespace: adi
   labels:
     app: node-exporter
 spec:
@@ -158,7 +158,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-deployment
-  namespace: argotest
+  namespace: adi
 spec:
   replicas: 3
   selector:
@@ -184,7 +184,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: app-service
-  namespace: argotest
+  namespace: adi
 spec:
   selector:
     app: app
