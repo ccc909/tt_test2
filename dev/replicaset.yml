@@ -16,9 +16,10 @@ spec:
     spec:
       containers:
       - name: example-container
-        image: nginx:latest
+        image: ghcr.io/ccc909/proiect_tt:latest
         ports:
         - containerPort: 80
+        - containerPort: 9100
 ---
 
 apiVersion: monitoring.coreos.com/v1
@@ -36,7 +37,6 @@ spec:
     interval: 30s
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:
@@ -45,8 +45,12 @@ metadata:
     app: example
 spec:
   ports:
-  - name: metrics
+  - name: http
     port: 80
     targetPort: 80
+  - name: metrics
+    port: 9100
+    targetPort: 9100
   selector:
     app: example
+
