@@ -13,10 +13,12 @@ spec:
     metadata:
       labels:
         app: myapp
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '80'
     spec:
       containers:
       - name: mycontainer
         image: nginx:latest
         ports:
         - containerPort: 80
-
