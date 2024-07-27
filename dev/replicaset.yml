@@ -1,24 +1,52 @@
 apiVersion: apps/v1
 kind: ReplicaSet
 metadata:
-  name: my-replicaset
+  name: example-replicaset
   labels:
-    app: myapp
+    app: example
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: myapp
+      app: example
   template:
     metadata:
       labels:
-        app: myapp
-      annotations:
-        prometheus.io/scrape: 'true'
-        prometheus.io/port: '80'
+        app: example
     spec:
       containers:
-      - name: mycontainer
+      - name: example-container
         image: nginx:latest
         ports:
         - containerPort: 80
+---
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: example-servicemonitor
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: example
+  endpoints:
+  - port: metrics
+    interval: 30s
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-service
+  labels:
+    app: example
+spec:
+  ports:
+  - name: metrics
+    port: 80
+    targetPort: 80
+  selector:
+    app: example
